@@ -1,0 +1,70 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: sage_user
+          POSTGRES_PASSWORD: sage_password
+          POSTGRES_DB: sage_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm --filter @sagemodules/database generate
+
+      - name: Lint workspace
+        run: pnpm --filter web lint
+
+      - name: TypeScript type-check
+        run: pnpm --filter web type-check
+
+      - name: Build monorepo
+        run: pnpm build
+        env:
+          DATABASE_URL: postgresql://sage_user:sage_password@localhost:5432/sage_db?schema=public
+          REDIS_URL: redis://localhost:6379/0
+          NEXTAUTH_SECRET: github_actions_secret_placeholder
