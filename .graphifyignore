@@ -1,0 +1,17 @@
+# Ignore non-code assets to allow keyless/code-only Graphify parsing
+docs/
+*.md
+*.svg
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.json
+*.yml
+*.yaml
+Dockerfile
+docker-compose.yml
+pnpm-lock.yaml
+.github/
+.agents/
