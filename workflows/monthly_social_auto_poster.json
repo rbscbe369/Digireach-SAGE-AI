@@ -1,0 +1,602 @@
+{
+  "name": "Digireach - Monthly Social Media Auto-Poster (Ollama)",
+  "nodes": [
+    {
+      "id": "f21fbf2c-e0c8-4cdb-bd93-27573736c552",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -200,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 8,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "b5c620a8-5147-4162-ba14-f1ae17b486fc",
+      "name": "Get Today's Post",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        40,
+        0
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "PASTE_YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Monthly Plan",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Date",
+              "lookupValue": "={{ $today.format('yyyy-MM-dd') }}"
+            },
+            {
+              "lookupColumn": "Status",
+              "lookupValue": "Pending"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "Reads the row from your Monthly Plan sheet matching today's date and Status = Pending. Add a 'Date' column (yyyy-mm-dd) and a 'Status' column to your sheet before running."
+    },
+    {
+      "id": "7011e95c-5d71-4787-b247-e4e4e01f2eac",
+      "name": "Has Post Today?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        280,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json['Content Idea'] }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "75e3eb12-49b7-41df-a43f-c9a4faa18cba",
+      "name": "Ollama Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        520,
+        200
+      ],
+      "parameters": {
+        "model": "llama3.1:70b",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "notes": "Point 'Base URL' in the Ollama credential to your local Ollama instance, e.g. http://localhost:11434. Pull the model first: ollama pull llama3.1:70b"
+    },
+    {
+      "id": "2f209a99-ccae-4cc9-a1f1-40eca63a90f3",
+      "name": "AI Agent - Generate Caption",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        520,
+        0
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json['AI Copywriting Prompt'] }}",
+        "options": {
+          "systemMessage": "You are a senior B2B marketing copywriter with 20+ years of agency experience. Follow the user's instructions exactly. Output ONLY the final post caption text \u2014 no preamble, no explanation, no markdown formatting."
+        }
+      }
+    },
+    {
+      "id": "a0fa8441-7c12-4637-b0c5-cfcb9c4bca24",
+      "name": "Format Per Platform",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const caption = $input.first().json.output || $input.first().json.text;\nconst row = $('Get Today\\'s Post').first().json;\n// Pull hashtags and platform list from the sheet row\nconst hashtags = row['Hashtag Cluster'] || '';\nconst platforms = (row['Platform(s)'] || '').toLowerCase();\n\nreturn [{\n  json: {\n    baseCaption: caption,\n    facebookCaption: caption + '\\n\\n' + hashtags,\n    instagramCaption: caption + '\\n.\\n.\\n' + hashtags,\n    linkedinCaption: caption,\n    postToFacebook: platforms.includes('facebook'),\n    postToInstagram: platforms.includes('instagram'),\n    postToLinkedIn: platforms.includes('linkedin'),\n    imagePrompt: row['AI Image/Video Generation Prompt'],\n    cta: row['CTA']\n  }\n}];"
+      },
+      "notes": "Splits the single AI Agent caption into platform-specific versions and reads the Platform(s) column to decide which publish branches should fire."
+    },
+    {
+      "id": "69779bc5-ba9b-4253-aace-b4f2b62f4508",
+      "name": "Generate AI Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1020,
+        -140
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.stability.ai/v2beta/stable-image/generate/core",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "prompt",
+              "value": "={{ $json.imagePrompt }}"
+            },
+            {
+              "name": "aspect_ratio",
+              "value": "4:5"
+            },
+            {
+              "name": "output_format",
+              "value": "png"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "notes": "Swap this for Leonardo AI, Midjourney (via API proxy), or a local Stable Diffusion/ComfyUI endpoint if you'd rather not use a paid API. Output must be binary image data."
+    },
+    {
+      "id": "d04e881f-c711-4b8e-9c2c-3b1b66fad49e",
+      "name": "Load Digireach Logo",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        1020,
+        60
+      ],
+      "parameters": {
+        "filePath": "/data/branding/digireach-logo.png"
+      },
+      "notes": "Point this at your logo PNG file on the n8n host (transparent background, recommended min 500px wide)."
+    },
+    {
+      "id": "982d9312-3a27-443c-b202-6dec147b6b4e",
+      "name": "Merge Image + Logo",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1260,
+        -40
+      ],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      }
+    },
+    {
+      "id": "de1b4ef1-b17b-4402-8fde-d8331795e7d3",
+      "name": "Composite Logo Onto Image",
+      "type": "n8n-nodes-base.editImage",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        -40
+      ],
+      "parameters": {
+        "operation": "composite",
+        "dataPropertyName": "data",
+        "dataPropertyNameComposite": "data1",
+        "positionX": "={{ $json.width - 180 }}",
+        "positionY": "={{ $json.height - 100 }}"
+      },
+      "notes": "Composites the logo onto the bottom-right corner of the AI-generated image. Adjust position math to match your canvas size and desired padding."
+    },
+    {
+      "id": "87c61f77-8be7-404a-b4dd-f546554afb7a",
+      "name": "Publish to Facebook",
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [
+        1760,
+        -220
+      ],
+      "parameters": {
+        "node": "={{ $json.pageId }}",
+        "edge": "photos",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              {
+                "name": "caption",
+                "value": "={{ $('Format Per Platform').item.json.facebookCaption }}"
+              }
+            ]
+          }
+        }
+      },
+      "notes": "Requires a Facebook Graph API credential with pages_manage_posts + pages_read_engagement permissions, and your Page ID."
+    },
+    {
+      "id": "d52c5717-331c-462d-9039-a1a165da6a2d",
+      "name": "Create Instagram Media",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        -20
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v20.0/{{ $json.igUserId }}/media",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "image_url",
+              "value": "={{ $json.publicImageUrl }}"
+            },
+            {
+              "name": "caption",
+              "value": "={{ $('Format Per Platform').item.json.instagramCaption }}"
+            }
+          ]
+        }
+      },
+      "notes": "Instagram's API needs a publicly reachable image URL, not raw binary. Upload the composited image to storage (S3/Cloudinary/Google Drive public link) before this step."
+    },
+    {
+      "id": "5ce331b0-73b9-4be1-9472-2911179b560d",
+      "name": "Publish Instagram Media",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2000,
+        -20
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v20.0/{{ $json.igUserId }}/media_publish",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "creation_id",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "3c29072f-c28f-4650-8e84-31f069eaa90b",
+      "name": "Publish to LinkedIn",
+      "type": "n8n-nodes-base.linkedIn",
+      "typeVersion": 1,
+      "position": [
+        1760,
+        180
+      ],
+      "parameters": {
+        "text": "={{ $('Format Per Platform').item.json.linkedinCaption }}",
+        "shareMediaCategory": "IMAGE",
+        "additionalFields": {}
+      },
+      "notes": "Requires a LinkedIn OAuth2 credential (Company Page or Personal), connected via n8n's LinkedIn node."
+    },
+    {
+      "id": "9ddc562f-b394-47da-98b1-57bd49ad4074",
+      "name": "Mark Row as Posted",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2260,
+        -20
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "PASTE_YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Monthly Plan",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status": "Posted"
+          }
+        },
+        "matchingColumns": [
+          "Date"
+        ]
+      }
+    },
+    {
+      "id": "2d937141-0a52-4faf-9f7f-0f9d94adb791",
+      "name": "Sticky Note - Trigger + Read",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -200,
+        -260
+      ],
+      "parameters": {
+        "content": "## 1. Trigger + read today's plan\nRuns daily. Pulls the matching row from your Monthly Plan Google Sheet (Date + Status = Pending).",
+        "height": 220,
+        "width": 460,
+        "color": 4
+      }
+    },
+    {
+      "id": "12aceb59-74c8-4e6d-b522-7e0d8d2916e6",
+      "name": "Sticky Note - AI Generation",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        520,
+        -260
+      ],
+      "parameters": {
+        "content": "## 2. Ollama generates the caption\nAgent node calls your local Ollama model using the 'AI Copywriting Prompt' column, then Code node splits it per platform.",
+        "height": 220,
+        "width": 460,
+        "color": 5
+      }
+    },
+    {
+      "id": "eaeee6b1-a2d1-42fc-9420-4acb4a24803b",
+      "name": "Sticky Note - Image + Branding",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1020,
+        -380
+      ],
+      "parameters": {
+        "content": "## 3. Image generation + logo\nGenerates the visual from the 'AI Image/Video Generation Prompt' column, then composites your Digireach logo on top.",
+        "height": 260,
+        "width": 460,
+        "color": 3
+      }
+    },
+    {
+      "id": "f6db74da-9cea-461f-9164-f675225def5b",
+      "name": "Sticky Note - Publish",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1760,
+        -420
+      ],
+      "parameters": {
+        "content": "## 4. Publish + log\nFires to whichever platforms the sheet row lists (Facebook/Instagram/LinkedIn), then marks the row Posted so it never repeats.",
+        "height": 260,
+        "width": 520,
+        "color": 7
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Today's Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Today's Post": {
+      "main": [
+        [
+          {
+            "node": "Has Post Today?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Post Today?": {
+      "main": [
+        [
+          {
+            "node": "AI Agent - Generate Caption",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent - Generate Caption",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent - Generate Caption": {
+      "main": [
+        [
+          {
+            "node": "Format Per Platform",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Per Platform": {
+      "main": [
+        [
+          {
+            "node": "Generate AI Image",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Load Digireach Logo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate AI Image": {
+      "main": [
+        [
+          {
+            "node": "Merge Image + Logo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Digireach Logo": {
+      "main": [
+        [
+          {
+            "node": "Merge Image + Logo",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Image + Logo": {
+      "main": [
+        [
+          {
+            "node": "Composite Logo Onto Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Composite Logo Onto Image": {
+      "main": [
+        [
+          {
+            "node": "Publish to Facebook",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create Instagram Media",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Publish to LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Instagram Media": {
+      "main": [
+        [
+          {
+            "node": "Publish Instagram Media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish to Facebook": {
+      "main": [
+        [
+          {
+            "node": "Mark Row as Posted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish Instagram Media": {
+      "main": [
+        [
+          {
+            "node": "Mark Row as Posted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish to LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Mark Row as Posted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "cedb501e-e39b-4863-9f7a-a46d98bdf9de",
+  "meta": {
+    "instanceId": "digireach-social-agent"
+  }
+}
